@@ -1,0 +1,75 @@
+@import url("https://fonts.googleapis.com/css2?family=Allura&family=Dancing+Script:wght@400;500;600;700&family=Great+Vibes&display=swap");
+@import "tailwindcss";
+
+:root {
+  --primary: #86503c;
+  --primary-foreground: #fff7f2;
+  --background: #f9f4f1;
+  --foreground: #392922;
+  --card: #f6eee9;
+  --muted: #6e5b51;
+  --border: #d7c8be;
+  --cream: #f0e4dc;
+  --gold: #b87a5e;
+}
+* {
+  box-sizing: border-box;
+}
+html {
+  scroll-behavior: smooth;
+}
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Georgia, serif;
+}
+.font-calligraphy {
+  font-family: "Great Vibes", "Dancing Script", cursive;
+}
+.font-dancing {
+  font-family: "Dancing Script", cursive;
+}
+.font-display {
+  font-family: Georgia, serif;
+}
+.cream-bg {
+  background: #f4ebe5;
+}
+.gold-gradient-text {
+  background: linear-gradient(90deg, #9b654e, #d4af37, #9b654e);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.shadow-elegant {
+  box-shadow: 0 18px 50px -25px rgba(80, 35, 20, 0.5);
+}
+.shadow-gold {
+  box-shadow: 0 12px 30px -12px rgba(0, 0, 0, 0.45);
+}
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+.float {
+  animation: float 1.8s ease-in-out infinite;
+}
+@keyframes confetti {
+  to {
+    transform: translate3d(var(--x), 110vh, 0) rotate(var(--r));
+    opacity: 0;
+  }
+}
+.confetti {
+  position: fixed;
+  top: -20px;
+  z-index: 80;
+  animation: confetti 2.8s linear forwards;
+  pointer-events: none;
+}
