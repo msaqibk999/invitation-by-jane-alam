@@ -50,7 +50,7 @@ export function RSVP() {
   };
 
   return (
-    <section className="py-12 sm:py-16 md:py-24 md:pt-0 px-4 sm:px-6">
+    <section className="py-12 sm:py-16 md:py-24 px-4 sm:px-6">
       <div className="w-full max-w-3xl mx-auto">
         {/* Header */}
         <div className="text-center">

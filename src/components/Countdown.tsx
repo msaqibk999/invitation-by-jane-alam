@@ -35,7 +35,7 @@ export function Countdown() {
     return () => clearInterval(id);
   }, []);
   return (
-    <section className="py-16 md:py-20 px-6 cream-bg text-center">
+    <section className="py-16 md:py-20 px-6 text-center ">
       <h2 className="font-calligraphy text-4xl md:text-7xl text-[var(--primary)] mb-3">
         Counting Down to Forever
       </h2>

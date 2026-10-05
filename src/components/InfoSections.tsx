@@ -14,13 +14,15 @@ const Shell = ({
   icon: Icon,
   children,
   cream = true,
+  noPadding = false,
 }: {
   title: string;
   icon: any;
   children: React.ReactNode;
   cream?: boolean;
+  noPadding?: boolean;
 }) => (
-  <section className={`py-16 md:py-24 px-6 ${cream ? "cream-bg" : ""}`}>
+  <section className={`py-16 md:py-24 ${noPadding ? `md:pt-0` : ``} px-6 ${cream ? "cream-bg" : ""}`}>
     <div className="max-w-3xl mx-auto">
       <div className="text-center">
         <Icon className="mx-auto text-[var(--primary)] mb-6" size={45} />
@@ -143,7 +145,7 @@ export function PreWedding() {
 
 export function SpecialInviters() {
   return (
-    <Shell title="With Warm Regards" icon={Heart} cream={false}>
+    <Shell title="With Warm Regards" icon={Heart}>
       <div className="mt-8 rounded-2xl border border-[var(--border)] bg-white/60 p-8 md:p-12">
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-8 gap-y-5 text-center">
           {wedding.specialInviters.map((name, i) => (
@@ -163,20 +165,20 @@ export function SpecialInviters() {
 export function SimpleInfo() {
   return (
     <>
-      <Shell title="Transportation" icon={Car}>
-        <p className="text-center text-2xl mt-8">
+      <Shell title="Transportation" icon={Car} cream={false}>
+        <p className="text-center text-3xl mt-0">
           Transportation details will be shared with confirmed guests.
         </p>
       </Shell>
 
-      <Shell title="Accommodation" icon={Hotel} cream={false}>
-        <p className="text-center text-2xl mt-8">
+      <Shell title="Accommodation" icon={Hotel} >
+        <p className="text-center text-3xl mt-8">
           Accommodation information will be shared with guests who need it.
         </p>
       </Shell>
 
-      <Shell title="Gifts" icon={Gift}>
-        <p className="text-center text-2xl mt-8">
+      <Shell title="Gifts" icon={Gift} cream={false}>
+        <p className="text-center text-3xl mt-8">
           Your presence and blessings are the greatest gift.
         </p>
       </Shell>
