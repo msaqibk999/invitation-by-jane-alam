@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { CalendarPlus } from "lucide-react";
 import { wedding } from "../data/wedding";
 
+/* -------------------------------------------------------
+ * SVG heart (viewBox 0 0 100 100)
+ * ----------------------------------------------------- */
+
 const HEART_PATH = `
   M50 96
   C50 96 6 70 6 36
@@ -13,644 +17,326 @@ const HEART_PATH = `
   Z
 `;
 
-export function InvitationCard({
-  onReveal,
-}: {
-  onReveal: () => void;
-}) {
+/* -------------------------------------------------------
+ * Canvas heart: same shape as HEART_PATH, scaled to w x h
+ * Used for BOTH drawing the scratch layer and building the
+ * reveal mask, so they can never drift apart.
+ * ----------------------------------------------------- */
+
+function buildHeartPath(w: number, h: number) {
+  const p = new Path2D();
+  p.moveTo(w * 0.5, h * 0.96);
+  p.bezierCurveTo(w * 0.5, h * 0.96, w * 0.06, h * 0.7, w * 0.06, h * 0.36);
+  p.bezierCurveTo(w * 0.06, h * 0.18, w * 0.2, h * 0.06, w * 0.32, h * 0.06);
+  p.bezierCurveTo(w * 0.42, h * 0.06, w * 0.48, h * 0.14, w * 0.5, h * 0.24);
+  p.bezierCurveTo(w * 0.52, h * 0.14, w * 0.58, h * 0.06, w * 0.68, h * 0.06);
+  p.bezierCurveTo(w * 0.8, h * 0.06, w * 0.94, h * 0.18, w * 0.94, h * 0.36);
+  p.bezierCurveTo(w * 0.94, h * 0.7, w * 0.5, h * 0.96, w * 0.5, h * 0.96);
+  p.closePath();
+  return p;
+}
+
+function drawScratchLayer(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number
+) {
+  ctx.clearRect(0, 0, width, height);
+
+  const heartPath = buildHeartPath(width, height);
+
+  ctx.save();
+  ctx.clip(heartPath);
+
+  // Scratch card gradient
+  const gradient = ctx.createLinearGradient(0, 0, width, height);
+  gradient.addColorStop(0, "#e4cec6");
+  gradient.addColorStop(0.45, "#f5e8e3");
+  gradient.addColorStop(1, "#d3b5aa");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, width, height);
+
+  // Texture dots
+  ctx.fillStyle = "rgba(255,255,255,0.35)";
+  for (let x = 0; x < width; x += 12) {
+    for (let y = 0; y < height; y += 12) {
+      ctx.beginPath();
+      ctx.arc(x, y, 1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Instruction text
+  ctx.textAlign = "center";
+  ctx.fillStyle = "rgba(145,70,82,0.85)";
+  ctx.font = "italic 30px Georgia";
+  ctx.fillText("Scratch", width / 2, height * 0.45);
+  ctx.font = "italic 21px Georgia";
+  ctx.fillText("to reveal our date", width / 2, height * 0.51);
+
+  ctx.restore();
+
+  // Heart border
+  ctx.save();
+  ctx.strokeStyle = "rgba(125,71,54,0.75)";
+  ctx.lineWidth = 2;
+  ctx.stroke(heartPath);
+  ctx.restore();
+}
+
+/* -------------------------------------------------------
+ * Constants
+ * ----------------------------------------------------- */
+
+const SAMPLE = 60; // low-res grid used to measure how much is scratched
+const REVEAL_THRESHOLD = 0.6; // fraction of the heart that must be scratched
+const BRUSH_RADIUS = 25;
+const CHECK_INTERVAL_MS = 120;
+
+/* -------------------------------------------------------
+ * Component
+ * ----------------------------------------------------- */
+
+export function InvitationCard({ onReveal }: { onReveal: () => void }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const [isScratching, setIsScratching] = useState(false);
   const [revealed, setRevealed] = useState(false);
 
-  /*
-   * -------------------------------------------------------
-   * GOOGLE CALENDAR
-   * -------------------------------------------------------
-   */
+  // Refs instead of state: no re-render on every pointer move
+  const scratchingRef = useRef(false);
+  const revealedRef = useRef(false);
+  const lastPointRef = useRef<{ x: number; y: number } | null>(null);
+  const sampleRef = useRef<HTMLCanvasElement | null>(null);
+  const maskRef = useRef<{ mask: Uint8Array; count: number } | null>(null);
+  const sizeRef = useRef({ w: 0, h: 0 });
+  const lastCheckRef = useRef(0);
+  const hideTimerRef = useRef<number | null>(null);
+
+  /* -----------------------------------------------------
+   * Google Calendar
+   * --------------------------------------------------- */
 
   const save = () => {
     const start = "20261231T103000";
     const end = "20261231T130000";
 
+    const text = encodeURIComponent(
+      `${wedding.groom.name} & ${wedding.bride.name} Wedding`
+    );
+    const location = encodeURIComponent(
+      `${wedding.venue.name}, ${wedding.venue.address}`
+    );
+
     window.open(
-      `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${wedding.groom.name}%20%26%20${wedding.bride.name}%20Wedding&dates=${start}/${end}&location=${encodeURIComponent(
-        wedding.venue.name + ", " + wedding.venue.address
-      )}`,
-      "_blank"
+      `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${text}&dates=${start}/${end}&location=${location}`,
+      "_blank",
+      "noopener,noreferrer"
     );
   };
 
-  /*
-   * -------------------------------------------------------
-   * CANVAS
-   * -------------------------------------------------------
-   */
+  /* -----------------------------------------------------
+   * Canvas setup
+   *  - sized from the container via ResizeObserver
+   *  - NO inline canvas.style.width/height (CSS controls it),
+   *    which is what caused the overflow / white space on iOS
+   *  - only redraws when the size really changes, so iOS
+   *    toolbar show/hide does not wipe the user's scratching
+   * --------------------------------------------------- */
 
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
-
     if (!canvas || !container) return;
 
-    const ctx = canvas.getContext("2d", {
-      willReadFrequently: true,
-    });
-
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
     if (!ctx) return;
 
-    const drawScratchLayer = (
-      ctx: CanvasRenderingContext2D,
-      width: number,
-      height: number
-    ) => {
-      ctx.clearRect(0, 0, width, height);
+    // One reusable sample canvas + a precomputed heart mask
+    const sample = document.createElement("canvas");
+    sample.width = SAMPLE;
+    sample.height = SAMPLE;
+    sampleRef.current = sample;
 
-      /*
-       * Exact same heart shape as SVG
-       */
+    const sctx = sample.getContext("2d", { willReadFrequently: true });
+    if (!sctx) return;
 
-      const heartPath = new Path2D();
-
-      heartPath.moveTo(
-        width * 0.5,
-        height * 0.96
-      );
-
-      heartPath.bezierCurveTo(
-        width * 0.5,
-        height * 0.96,
-        width * 0.06,
-        height * 0.70,
-        width * 0.06,
-        height * 0.36
-      );
-
-      heartPath.bezierCurveTo(
-        width * 0.06,
-        height * 0.18,
-        width * 0.20,
-        height * 0.06,
-        width * 0.32,
-        height * 0.06
-      );
-
-      heartPath.bezierCurveTo(
-        width * 0.42,
-        height * 0.06,
-        width * 0.48,
-        height * 0.14,
-        width * 0.50,
-        height * 0.24
-      );
-
-      heartPath.bezierCurveTo(
-        width * 0.52,
-        height * 0.14,
-        width * 0.58,
-        height * 0.06,
-        width * 0.68,
-        height * 0.06
-      );
-
-      heartPath.bezierCurveTo(
-        width * 0.80,
-        height * 0.06,
-        width * 0.94,
-        height * 0.18,
-        width * 0.94,
-        height * 0.36
-      );
-
-      heartPath.bezierCurveTo(
-        width * 0.94,
-        height * 0.70,
-        width * 0.50,
-        height * 0.96,
-        width * 0.50,
-        height * 0.96
-      );
-
-      /*
-       * Clip scratch layer to heart
-       */
-
-      ctx.save();
-
-      ctx.clip(heartPath);
-
-      /*
-       * Scratch card gradient
-       */
-
-      const gradient = ctx.createLinearGradient(
-        0,
-        0,
-        width,
-        height
-      );
-
-      gradient.addColorStop(
-        0,
-        "#e4cec6"
-      );
-
-      gradient.addColorStop(
-        0.45,
-        "#f5e8e3"
-      );
-
-      gradient.addColorStop(
-        1,
-        "#d3b5aa"
-      );
-
-      ctx.fillStyle = gradient;
-
-      ctx.fillRect(
-        0,
-        0,
-        width,
-        height
-      );
-
-      /*
-       * Texture
-       */
-
-      ctx.fillStyle =
-        "rgba(255,255,255,0.35)";
-
-      for (
-        let x = 0;
-        x < width;
-        x += 12
-      ) {
-        for (
-          let y = 0;
-          y < height;
-          y += 12
-        ) {
-          ctx.beginPath();
-
-          ctx.arc(
-            x,
-            y,
-            1,
-            0,
-            Math.PI * 2
-          );
-
-          ctx.fill();
-        }
+    sctx.fill(buildHeartPath(SAMPLE, SAMPLE));
+    const data = sctx.getImageData(0, 0, SAMPLE, SAMPLE).data;
+    const mask = new Uint8Array(SAMPLE * SAMPLE);
+    let count = 0;
+    for (let i = 0; i < mask.length; i++) {
+      if (data[i * 4 + 3] > 128) {
+        mask[i] = 1;
+        count++;
       }
+    }
+    maskRef.current = { mask, count };
 
-      /*
-       * Scratch instruction
-       */
+    const setup = () => {
+      if (revealedRef.current) return;
 
-      ctx.textAlign = "center";
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      if (!w || !h) return;
 
-      ctx.fillStyle =
-        "rgba(145,70,82,0.85)";
+      // Ignore sub-pixel / unchanged sizes
+      if (
+        Math.abs(w - sizeRef.current.w) < 1 &&
+        Math.abs(h - sizeRef.current.h) < 1
+      ) {
+        return;
+      }
+      sizeRef.current = { w, h };
 
-      ctx.font =
-        "italic 30px Georgia";
+      // Cap DPR: iOS has a hard canvas memory limit
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
 
-      ctx.fillText(
-        "Scratch",
-        width / 2,
-        height * 0.45
-      );
-
-      ctx.font =
-        "italic 21px Georgia";
-
-      ctx.fillText(
-        "to reveal our date",
-        width / 2,
-        height * 0.51
-      );
-
-      ctx.restore();
-
-      /*
-       * Heart border
-       */
-
-      ctx.save();
-
-      ctx.strokeStyle =
-        "rgba(125,71,54,0.75)";
-
-      ctx.lineWidth = 2;
-
-      ctx.stroke(heartPath);
-
-      ctx.restore();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.globalCompositeOperation = "source-over";
+      drawScratchLayer(ctx, w, h);
     };
 
-    const resizeCanvas = () => {
-      const rect =
-        container.getBoundingClientRect();
+    setup();
 
-      const dpr =
-        window.devicePixelRatio || 1;
-
-      canvas.width =
-        rect.width * dpr;
-
-      canvas.height =
-        rect.height * dpr;
-
-      canvas.style.width =
-        `${rect.width}px`;
-
-      canvas.style.height =
-        `${rect.height}px`;
-
-      ctx.setTransform(
-        dpr,
-        0,
-        0,
-        dpr,
-        0,
-        0
-      );
-
-      drawScratchLayer(
-        ctx,
-        rect.width,
-        rect.height
-      );
-    };
-
-    resizeCanvas();
-
-    window.addEventListener(
-      "resize",
-      resizeCanvas
-    );
+    const ro = new ResizeObserver(setup);
+    ro.observe(container);
 
     return () => {
-      window.removeEventListener(
-        "resize",
-        resizeCanvas
-      );
+      ro.disconnect();
+      sizeRef.current = { w: 0, h: 0 };
+      if (hideTimerRef.current) {
+        window.clearTimeout(hideTimerRef.current);
+        hideTimerRef.current = null;
+      }
     };
   }, []);
 
-  /*
-   * -------------------------------------------------------
-   * SCRATCH
-   * -------------------------------------------------------
-   */
+  /* -----------------------------------------------------
+   * Reveal check (throttled, reuses one sample canvas)
+   * --------------------------------------------------- */
 
-  const scratch = (
-    clientX: number,
-    clientY: number
-  ) => {
-    const canvas = canvasRef.current;
-    const container = containerRef.current;
+  const checkReveal = (canvas: HTMLCanvasElement) => {
+    const now = performance.now();
+    if (now - lastCheckRef.current < CHECK_INTERVAL_MS) return;
+    lastCheckRef.current = now;
 
-    if (
-      !canvas ||
-      !container ||
-      revealed
-    ) {
-      return;
+    const sample = sampleRef.current;
+    const m = maskRef.current;
+    if (!sample || !m || !m.count) return;
+
+    const sctx = sample.getContext("2d", { willReadFrequently: true });
+    if (!sctx) return;
+
+    sctx.clearRect(0, 0, SAMPLE, SAMPLE);
+    sctx.drawImage(canvas, 0, 0, SAMPLE, SAMPLE);
+    const px = sctx.getImageData(0, 0, SAMPLE, SAMPLE).data;
+
+    let scratched = 0;
+    for (let i = 0; i < m.mask.length; i++) {
+      // Only count pixels that are INSIDE the heart
+      if (m.mask[i] && px[i * 4 + 3] < 50) scratched++;
     }
 
-    const rect =
-      container.getBoundingClientRect();
-
-    const x =
-      clientX - rect.left;
-
-    const y =
-      clientY - rect.top;
-
-    /*
-     * Don't scratch outside heart
-     */
-
-    if (
-      !isPointInsideHeart(
-        x / rect.width,
-        y / rect.height
-      )
-    ) {
-      return;
-    }
-
-    const ctx =
-      canvas.getContext("2d");
-
-    if (!ctx) return;
-
-    ctx.globalCompositeOperation =
-      "destination-out";
-
-    /*
-     * Bigger scratch brush for 420px heart
-     */
-
-    const radius = 25;
-
-    ctx.beginPath();
-
-    ctx.arc(
-      x,
-      y,
-      radius,
-      0,
-      Math.PI * 2
-    );
-
-    ctx.fill();
-
-    checkReveal(
-      canvas,
-      rect.width,
-      rect.height
-    );
-  };
-
-  /*
-   * -------------------------------------------------------
-   * HEART POINTER CHECK
-   * -------------------------------------------------------
-   */
-
-  const isPointInsideHeart = (
-    x: number,
-    y: number
-  ) => {
-    const px = x * 100;
-    const py = y * 100;
-
-    if (
-      py < 6 ||
-      py > 96
-    ) {
-      return false;
-    }
-
-    if (
-      py < 24 &&
-      Math.abs(px - 50) < 3
-    ) {
-      return false;
-    }
-
-    return true;
-  };
-
-  /*
-   * -------------------------------------------------------
-   * 80% REVEAL
-   * -------------------------------------------------------
-   */
-
-  const checkReveal = (
-    canvas: HTMLCanvasElement,
-    width: number,
-    height: number
-  ) => {
-    const sampleCanvas =
-      document.createElement(
-        "canvas"
-      );
-
-    const sampleSize = 140;
-
-    sampleCanvas.width =
-      sampleSize;
-
-    sampleCanvas.height =
-      sampleSize;
-
-    const sampleCtx =
-      sampleCanvas.getContext("2d");
-
-    if (!sampleCtx) return;
-
-    sampleCtx.drawImage(
-      canvas,
-      0,
-      0,
-      sampleSize,
-      sampleSize
-    );
-
-    const imageData =
-      sampleCtx.getImageData(
-        0,
-        0,
-        sampleSize,
-        sampleSize
-      );
-
-    let heartPixels = 0;
-    let scratchedPixels = 0;
-
-    for (
-      let y = 0;
-      y < sampleSize;
-      y++
-    ) {
-      for (
-        let x = 0;
-        x < sampleSize;
-        x++
-      ) {
-        const nx =
-          x / sampleSize;
-
-        const ny =
-          y / sampleSize;
-
-        if (
-          !isPointInsideHeart(
-            nx,
-            ny
-          )
-        ) {
-          continue;
-        }
-
-        heartPixels++;
-
-        const index =
-          (y *
-            sampleSize +
-            x) *
-          4;
-
-        const alpha =
-          imageData.data[
-            index + 3
-          ];
-
-        if (alpha < 50) {
-          scratchedPixels++;
-        }
-      }
-    }
-
-    const percentage =
-      scratchedPixels /
-      heartPixels;
-
-    /*
-     * IMPORTANT:
-     * 80% required
-     */
-
-    if (percentage >= 0.60) {
+    if (scratched / m.count >= REVEAL_THRESHOLD) {
+      revealedRef.current = true;
+      scratchingRef.current = false;
       setRevealed(true);
       onReveal();
 
-      canvas.style.transition =
-        "opacity 1s ease";
-
+      canvas.style.transition = "opacity 1s ease";
       canvas.style.opacity = "0";
+      canvas.style.pointerEvents = "none";
 
-      setTimeout(() => {
-        canvas.style.display =
-          "none";
+      hideTimerRef.current = window.setTimeout(() => {
+        canvas.style.display = "none";
       }, 1000);
     }
   };
 
-  /*
-   * -------------------------------------------------------
-   * MOUSE
-   * -------------------------------------------------------
-   */
+  /* -----------------------------------------------------
+   * Scratch (draws a smooth line from the last point)
+   * --------------------------------------------------- */
 
-  const handleMouseDown = (
-    e: React.MouseEvent<HTMLCanvasElement>
-  ) => {
-    setIsScratching(true);
+  const scratch = (clientX: number, clientY: number) => {
+    const canvas = canvasRef.current;
+    const container = containerRef.current;
+    if (!canvas || !container || revealedRef.current) return;
 
-    scratch(
-      e.clientX,
-      e.clientY
-    );
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const rect = container.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    const last = lastPointRef.current;
+
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.lineWidth = BRUSH_RADIUS * 2;
+
+    if (last) {
+      ctx.beginPath();
+      ctx.moveTo(last.x, last.y);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.arc(x, y, BRUSH_RADIUS, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    lastPointRef.current = { x, y };
+    checkReveal(canvas);
   };
 
-  const handleMouseMove = (
-    e: React.MouseEvent<HTMLCanvasElement>
-  ) => {
-    if (!isScratching) return;
+  /* -----------------------------------------------------
+   * Pointer events (mouse + touch + pen in one API)
+   * --------------------------------------------------- */
 
-    scratch(
-      e.clientX,
-      e.clientY
-    );
+  const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    scratchingRef.current = true;
+    lastPointRef.current = null;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    scratch(e.clientX, e.clientY);
   };
 
-  const handleMouseUp = () => {
-    setIsScratching(false);
+  const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!scratchingRef.current) return;
+    scratch(e.clientX, e.clientY);
   };
 
-  /*
-   * -------------------------------------------------------
-   * TOUCH
-   * -------------------------------------------------------
-   */
-
-  const handleTouchStart = (
-    e: React.TouchEvent<HTMLCanvasElement>
-  ) => {
-    e.preventDefault();
-
-    setIsScratching(true);
-
-    const touch =
-      e.touches[0];
-
-    scratch(
-      touch.clientX,
-      touch.clientY
-    );
+  const onPointerUp = () => {
+    scratchingRef.current = false;
+    lastPointRef.current = null;
   };
 
-  const handleTouchMove = (
-    e: React.TouchEvent<HTMLCanvasElement>
-  ) => {
-    e.preventDefault();
-
-    if (!isScratching) return;
-
-    const touch =
-      e.touches[0];
-
-    scratch(
-      touch.clientX,
-      touch.clientY
-    );
-  };
-
-  const handleTouchEnd = () => {
-    setIsScratching(false);
-  };
-
-  /*
-   * =======================================================
+  /* =====================================================
    * UI
-   * =======================================================
-   */
+   * =================================================== */
 
   return (
-    <section className="py-16 md:py-20 px-6 cream-bg text-center">
-
-      <h2 className="font-calligraphy text-4xl md:text-8xl text-[var(--primary)]">
+    <section className="py-16 md:py-20 px-6 cream-bg text-center overflow-x-clip">
+      <h2 className="font-calligraphy text-4xl md:text-8xl text-[var(--primary)] break-words">
         Our forever begins
       </h2>
 
-      {/* =================================================
-          420 × 420 HEART
-      ================================================= */}
-
+      {/* Heart: responsive via aspect-ratio, never wider than the screen */}
       <div
         ref={containerRef}
-        className="
-          mx-auto
-          mt-10
-          relative
-          w-[580px]
-          h-[500px]
-          max-w-full
-        "
+        className="mx-auto mt-10 relative w-full max-w-[580px] aspect-[580/500]"
       >
-
-        {/* =================================================
-            SVG HEART + WEDDING CONTENT
-        ================================================= */}
-
         <svg
           viewBox="0 0 100 100"
-          className="
-            absolute
-            inset-0
-            w-full
-            h-full
-            z-10
-          "
+          className="absolute inset-0 w-full h-full z-10"
           preserveAspectRatio="none"
         >
-
           <defs>
-
             <clipPath id="heartClip">
-
-              <path
-                d={HEART_PATH}
-              />
-
+              <path d={HEART_PATH} />
             </clipPath>
 
             <radialGradient
@@ -659,41 +345,17 @@ export function InvitationCard({
               cy="45%"
               r="70%"
             >
-              <stop
-                offset="0%"
-                stopColor="#fffaf8"
-              />
-
-              <stop
-                offset="65%"
-                stopColor="#f4e5df"
-              />
-
-              <stop
-                offset="100%"
-                stopColor="#dfc5bb"
-              />
+              <stop offset="0%" stopColor="#fffaf8" />
+              <stop offset="65%" stopColor="#f4e5df" />
+              <stop offset="100%" stopColor="#dfc5bb" />
             </radialGradient>
-
           </defs>
 
-          {/* ---------------------------------------------
-              HEART BACKGROUND
-          --------------------------------------------- */}
+          {/* Heart background */}
+          <path d={HEART_PATH} fill="url(#heartBackground)" />
 
-          <path
-            d={HEART_PATH}
-            fill="url(#heartBackground)"
-          />
-
-          {/* ---------------------------------------------
-              CONTENT INSIDE HEART
-          --------------------------------------------- */}
-
+          {/* Content inside heart */}
           <g clipPath="url(#heartClip)">
-
-            {/* Small decorative line */}
-
             <text
               x="50"
               y="35"
@@ -704,8 +366,6 @@ export function InvitationCard({
             >
               YOU'RE INVITED
             </text>
-
-            {/* Main heading */}
 
             <text
               x="50"
@@ -743,8 +403,6 @@ export function InvitationCard({
               {wedding.bride.name}
             </text>
 
-            {/* Divider */}
-
             <line
               x1="35"
               y1="66"
@@ -754,8 +412,6 @@ export function InvitationCard({
               strokeWidth="0.5"
               opacity="0.6"
             />
-
-            {/* DATE */}
 
             <text
               x="50"
@@ -769,8 +425,6 @@ export function InvitationCard({
               {wedding.date}
             </text>
 
-            {/* TIME */}
-
             <text
               x="50"
               y="79"
@@ -781,13 +435,9 @@ export function InvitationCard({
             >
               {wedding.time}
             </text>
-
           </g>
 
-          {/* ---------------------------------------------
-              HEART BORDER
-          --------------------------------------------- */}
-
+          {/* Heart border */}
           <path
             d={HEART_PATH}
             fill="none"
@@ -796,115 +446,63 @@ export function InvitationCard({
             vectorEffect="non-scaling-stroke"
             opacity="0.75"
           />
-
         </svg>
 
-        {/* =================================================
-            420 × 420 SCRATCH CANVAS
-        ================================================= */}
-
+        {/* Scratch canvas: sized purely by CSS, bitmap size set in effect */}
         <canvas
           ref={canvasRef}
-          className="
-            absolute
-            inset-0
-            w-full
-            h-full
-            z-20
-            cursor-pointer
-            touch-none
-          "
-          onMouseDown={
-            handleMouseDown
-          }
-          onMouseMove={
-            handleMouseMove
-          }
-          onMouseUp={
-            handleMouseUp
-          }
-          onMouseLeave={
-            handleMouseUp
-          }
-          onTouchStart={
-            handleTouchStart
-          }
-          onTouchMove={
-            handleTouchMove
-          }
-          onTouchEnd={
-            handleTouchEnd
-          }
+          className="absolute inset-0 w-full h-full z-20 cursor-pointer touch-none"
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
         />
-
       </div>
 
-      {/* =================================================
-          MESSAGE AFTER SCRATCH
-      ================================================= */}
-
+      {/* Message after scratch */}
       <div
+        className={`mt-7 transition-all duration-1000 ${
+          revealed ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+        }`}
+      >
+        <p className="font-calligraphy text-6xl text-[#914652] mt-8">
+          Our Special Day ❤️
+        </p>
+      </div>
+
+      {/* Calendar button */}
+      <button
+        onClick={save}
+        disabled={!revealed}
         className={`
-          mt-7
+          mt-12
+          inline-flex
+          items-center
+          gap-2
+          rounded-full
+          px-12
+          py-6
+          text-xs
+          md:text-3xl
+          font-semibold
+          uppercase
+          tracking-[.18em]
+          bg-[var(--primary)]
+          text-white
+          shadow-gold
           transition-all
-          duration-1000
+          duration-[1800ms]
+          ease-[cubic-bezier(0.22,1,0.36,1)]
           ${
             revealed
-              ? "opacity-100 translate-y-0"
-              : "opacity-0 translate-y-4"
+              ? "opacity-100 translate-y-0 scale-100"
+              : "opacity-0 translate-y-6 scale-[0.96] pointer-events-none"
           }
         `}
       >
-
-        <p className="
-          font-calligraphy
-          text-6xl
-          text-[#914652]
-          mt-8
-        ">
-          Our Special Day ❤️
-        </p>
-
-      </div>
-
-      {/* =================================================
-          CALENDAR BUTTON
-      ================================================= */}
-
-    <button
-      onClick={save}
-      className={`
-        mt-12
-        inline-flex
-        items-center
-        gap-2
-        rounded-full
-        px-12
-        py-6
-        text-xs
-        md:text-3xl
-        font-semibold
-        uppercase
-        tracking-[.18em]
-        bg-[var(--primary)]
-        text-white
-        shadow-gold
-
-        transition-all
-        duration-[1800ms]
-        ease-[cubic-bezier(0.22,1,0.36,1)]
-
-        ${
-          revealed
-            ? "opacity-100 translate-y-0 scale-100"
-            : "opacity-0 translate-y-6 scale-[0.96] pointer-events-none"
-        }
-      `}
-    >
-      <CalendarPlus size={32} />
-      Save the Date
-    </button>
-
+        <CalendarPlus size={32} />
+        Save the Date
+      </button>
     </section>
   );
 }

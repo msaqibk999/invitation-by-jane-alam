@@ -164,19 +164,19 @@ export function SimpleInfo() {
   return (
     <>
       <Shell title="Transportation" icon={Car}>
-        <p className="text-center text-[var(--muted)] mt-8">
+        <p className="text-center text-2xl mt-8">
           Transportation details will be shared with confirmed guests.
         </p>
       </Shell>
 
       <Shell title="Accommodation" icon={Hotel} cream={false}>
-        <p className="text-center text-[var(--muted)] mt-8">
+        <p className="text-center text-2xl mt-8">
           Accommodation information will be shared with guests who need it.
         </p>
       </Shell>
 
       <Shell title="Gifts" icon={Gift}>
-        <p className="text-center text-[var(--muted)] mt-8">
+        <p className="text-center text-2xl mt-8">
           Your presence and blessings are the greatest gift.
         </p>
       </Shell>

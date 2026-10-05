@@ -1,6 +1,5 @@
 import { useRef, useState } from "react";
 import { Heart, ChevronDown } from "lucide-react";
-
 import { wedding } from "../data/wedding";
 
 interface HeroProps {
@@ -49,8 +48,8 @@ export function Hero({ onUnlock, onTap }: HeroProps) {
       setShowScroll(true);
     }
 
-    // Unlock page after 9 seconds
-    if (video.currentTime >= 9 && !pageUnlocked) {
+    // Unlock page after 10 seconds
+    if (video.currentTime >= 10 && !pageUnlocked) {
       setPageUnlocked(true);
       onUnlock();
     }
@@ -58,7 +57,7 @@ export function Hero({ onUnlock, onTap }: HeroProps) {
 
   return (
     <section
-      className="relative min-h-screen w-full overflow-hidden flex items-center justify-center bg-black"
+      className="relative h-[100dvh] min-h-[100dvh] w-full overflow-hidden flex items-center justify-center bg-black"
       onClick={() => {
         startVideo();
         onTap();
@@ -122,7 +121,7 @@ export function Hero({ onUnlock, onTap }: HeroProps) {
 
       {/* Scroll Indicator */}
       <div
-        className={`float absolute bottom-20 z-10 flex flex-col items-center gap-2 text-white/70 transition-opacity duration-[1200ms] ease-in-out ${
+        className={`absolute bottom-[max(3rem,env(safe-area-inset-bottom))] z-10 flex flex-col items-center gap-2 text-white/70 transition-opacity duration-[1200ms] ease-in-out ${
           showScroll
             ? "opacity-100"
             : "opacity-0 pointer-events-none"

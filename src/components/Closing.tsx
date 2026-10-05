@@ -19,20 +19,6 @@ export function Closing() {
           </div>
         </div>
       </section>
-      <footer className="py-10 px-9 md:px-12 text-center border-t border-[var(--border)] relative">
-        <p className="font-calligraphy text-2xl text-[var(--primary)]">
-          {wedding.groom.name} &amp; {wedding.bride.name}
-        </p>
-        <p className="text-2xl text-[var(--muted)] mt-2">
-          Designed & Developed by{" "}
-          <a
-            href="/"
-            className="font-calligraphy text-2xl gold-gradient-text font-semibold"
-          >
-            Amir Khan & The Groom Himself
-          </a>
-        </p>
-      </footer>
     </>
   );
 }
