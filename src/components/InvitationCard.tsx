@@ -103,21 +103,16 @@ function drawScratchLayer(
 }
 
 /* -------------------------------------------------------
- * Glitter
+ * Sparkles
+ *
+ * Everything is drawn on ONE canvas in ONE requestAnimationFrame
+ * loop (no per-sparkle DOM nodes, no CSS filters):
+ *  - glow is baked once into small sprites
+ *  - positions are computed from elapsed time, so the motion
+ *    stays smooth even if a frame is dropped
  * ----------------------------------------------------- */
 
-type Particle = {
-  id: number;
-  left: number;
-  size: number;
-  delay: number;
-  duration: number;
-  drift: number;
-  color: string;
-  star: boolean;
-};
-
-const GLITTER_COLORS = [
+const SPARKLE_COLORS = [
   "#f6d98b",
   "#e8b84a",
   "#fff3c4",
@@ -125,75 +120,131 @@ const GLITTER_COLORS = [
   "#ffffff",
   "#d9a441",
 ];
-const STAR_CLIP =
-  "polygon(50% 0%, 61% 39%, 100% 50%, 61% 61%, 50% 100%, 39% 61%, 0% 50%, 39% 39%)";
+const FX_DURATION = 12; // seconds
+const FALL_COUNT = 160;
+const BURST_COUNT = 40;
+const TWINKLE_COUNT = 26;
 
-function makeGlitter(count = 220): Particle[] {
-  return Array.from({ length: count }, (_, id) => ({
-    id,
-    left: Math.random() * 100,
-    size: 4 + Math.random() * 11,
-    delay: Math.random() * 4,
-    duration: 3 + Math.random() * 4,
-    drift: (Math.random() - 0.5) * 120,
-    color: GLITTER_COLORS[Math.floor(Math.random() * GLITTER_COLORS.length)],
-    star: Math.random() > 0.45,
-  }));
+let spriteCache: HTMLCanvasElement[][] | null = null;
+
+function getSprites() {
+  if (spriteCache) return spriteCache;
+
+  const S = 48;
+  spriteCache = SPARKLE_COLORS.map((color) =>
+    [true, false].map((star) => {
+      const c = document.createElement("canvas");
+      c.width = S;
+      c.height = S;
+      const g = c.getContext("2d")!;
+      g.fillStyle = color;
+      g.shadowColor = color;
+      g.shadowBlur = 8;
+      g.beginPath();
+      if (star) {
+        // 4-point sparkle
+        const R = S * 0.33;
+        const r = R * 0.28;
+        for (let i = 0; i < 8; i++) {
+          const a = (Math.PI / 4) * i - Math.PI / 2;
+          const rad = i % 2 === 0 ? R : r;
+          const px = S / 2 + Math.cos(a) * rad;
+          const py = S / 2 + Math.sin(a) * rad;
+          if (i === 0) g.moveTo(px, py);
+          else g.lineTo(px, py);
+        }
+        g.closePath();
+      } else {
+        g.arc(S / 2, S / 2, S * 0.13, 0, Math.PI * 2);
+      }
+      g.fill();
+      return c;
+    })
+  );
+  return spriteCache;
+}
+
+type FxParticle = {
+  kind: 0 | 1 | 2; // 0 = falling, 1 = burst, 2 = twinkle
+  sprite: HTMLCanvasElement;
+  delay: number;
+  dur: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  size: number;
+  rot: number;
+  spin: number;
+};
+
+function buildParticles(viewW: number): FxParticle[] {
+  const sprites = getSprites();
+  const rnd = (a: number, b: number) => a + Math.random() * (b - a);
+  const pick = (star: boolean) =>
+    sprites[Math.floor(Math.random() * sprites.length)][star ? 0 : 1];
+
+  const list: FxParticle[] = [];
+
+  // Falling glitter (top -> bottom)
+  for (let i = 0; i < FALL_COUNT; i++) {
+    list.push({
+      kind: 0,
+      sprite: pick(Math.random() > 0.45),
+      delay: rnd(0, 4),
+      dur: 0,
+      x: Math.random() * viewW,
+      y: 0,
+      vx: rnd(-40, 40),
+      vy: rnd(130, 280),
+      size: rnd(14, 30),
+      rot: rnd(0, Math.PI * 2),
+      spin: rnd(-3, 3),
+    });
+  }
+
+  // Burst from the heart centre
+  for (let i = 0; i < BURST_COUNT; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const dist = rnd(90, 280);
+    list.push({
+      kind: 1,
+      sprite: pick(true),
+      delay: rnd(0, 0.4),
+      dur: rnd(1.1, 2),
+      x: 0,
+      y: 0,
+      vx: Math.cos(angle) * dist,
+      vy: Math.sin(angle) * dist,
+      size: rnd(26, 52),
+      rot: rnd(0, Math.PI * 2),
+      spin: rnd(-2, 2),
+    });
+  }
+
+  // Twinkles on the heart
+  for (let i = 0; i < TWINKLE_COUNT; i++) {
+    list.push({
+      kind: 2,
+      sprite: pick(true),
+      delay: rnd(0.3, 3),
+      dur: rnd(0.9, 2),
+      x: rnd(0.1, 0.9),
+      y: rnd(0.1, 0.85),
+      vx: 0,
+      vy: 0,
+      size: rnd(26, 52),
+      rot: rnd(0, Math.PI * 2),
+      spin: 0.6,
+    });
+  }
+
+  return list;
 }
 
 /* -------------------------------------------------------
  * Constants
  * ----------------------------------------------------- */
-
-/* Burst: sparkles shooting outward from the heart centre */
-type BurstPiece = {
-  id: number;
-  dx: number;
-  dy: number;
-  size: number;
-  delay: number;
-  duration: number;
-  color: string;
-};
-
-function makeBurst(count = 48): BurstPiece[] {
-  return Array.from({ length: count }, (_, id) => {
-    const angle = Math.random() * Math.PI * 2;
-    const dist = 90 + Math.random() * 190;
-    return {
-      id,
-      dx: Math.cos(angle) * dist,
-      dy: Math.sin(angle) * dist,
-      size: 8 + Math.random() * 14,
-      delay: Math.random() * 0.5,
-      duration: 1.1 + Math.random() * 0.9,
-      color: GLITTER_COLORS[Math.floor(Math.random() * GLITTER_COLORS.length)],
-    };
-  });
-}
-
-/* Twinkles: stars that pop in and out on the heart */
-type Twinkle = {
-  id: number;
-  left: number;
-  top: number;
-  size: number;
-  delay: number;
-  duration: number;
-  color: string;
-};
-
-function makeTwinkles(count = 30): Twinkle[] {
-  return Array.from({ length: count }, (_, id) => ({
-    id,
-    left: 8 + Math.random() * 84,
-    top: 8 + Math.random() * 78,
-    size: 10 + Math.random() * 18,
-    delay: Math.random() * 3,
-    duration: 0.9 + Math.random() * 1.1,
-    color: GLITTER_COLORS[Math.floor(Math.random() * GLITTER_COLORS.length)],
-  }));
-}
 
 const SAMPLE = 60; // low-res grid used to measure how much is scratched
 const REVEAL_THRESHOLD = 0.6; // fraction of the heart that must be scratched
@@ -208,11 +259,9 @@ export function InvitationCard({ onReveal }: { onReveal: () => void }) {
   const sectionRef = useRef<HTMLElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fxCanvasRef = useRef<HTMLCanvasElement>(null);
 
   const [revealed, setRevealed] = useState(false);
-  const [glitter, setGlitter] = useState<Particle[]>([]);
-  const [burst, setBurst] = useState<BurstPiece[]>([]);
-  const [twinkles, setTwinkles] = useState<Twinkle[]>([]);
 
   // Refs instead of state: no re-render on every pointer move
   const scratchingRef = useRef(false);
@@ -223,7 +272,7 @@ export function InvitationCard({ onReveal }: { onReveal: () => void }) {
   const sizeRef = useRef({ w: 0, h: 0 });
   const lastCheckRef = useRef(0);
   const hideTimerRef = useRef<number | null>(null);
-  const glitterTimerRef = useRef<number | null>(null);
+  const rafRef = useRef<number | null>(null);
 
   /* -----------------------------------------------------
    * Google Calendar
@@ -245,6 +294,107 @@ export function InvitationCard({ onReveal }: { onReveal: () => void }) {
       "_blank",
       "noopener,noreferrer"
     );
+  };
+
+  /* -----------------------------------------------------
+   * Sparkles (single canvas + single rAF loop)
+   * --------------------------------------------------- */
+
+  const startSparkles = () => {
+    const fx = fxCanvasRef.current;
+    const container = containerRef.current;
+    if (!fx || !container) return;
+
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+
+    const ctx = fx.getContext("2d");
+    if (!ctx) return;
+
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+    fx.width = Math.round(W * dpr);
+    fx.height = Math.round(H * dpr);
+    fx.style.display = "block";
+
+    const particles = buildParticles(W);
+    const startTime = performance.now();
+
+    const stop = () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, fx.width, fx.height);
+      fx.style.display = "none";
+    };
+
+    const tick = (now: number) => {
+      const t = (now - startTime) / 1000;
+      if (t > FX_DURATION) {
+        stop();
+        return;
+      }
+
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, fx.width, fx.height);
+
+      // Heart position can change while the page smooth-scrolls
+      const rect = container.getBoundingClientRect();
+      const cx = rect.left + rect.width * 0.5;
+      const cy = rect.top + rect.height * 0.45;
+      const endFade = Math.min(1, FX_DURATION - t);
+
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+        const lt = t - p.delay;
+        if (lt < 0) continue;
+
+        let x = 0;
+        let y = 0;
+        let scale = 1;
+        let alpha = 1;
+
+        if (p.kind === 0) {
+          y = -24 + p.vy * lt;
+          if (y > H + 24) continue;
+          x = p.x + p.vx * lt;
+          alpha = Math.min(1, lt / 0.3);
+          scale = 0.55 + 0.45 * Math.abs(Math.sin(lt * 4 + p.rot));
+        } else if (p.kind === 1) {
+          const u = lt / p.dur;
+          if (u > 1) continue;
+          const e = 1 - Math.pow(1 - u, 3);
+          x = cx + p.vx * e;
+          y = cy + p.vy * e;
+          scale = u < 0.15 ? u / 0.15 : 1;
+          alpha = 1 - u * u;
+        } else {
+          const ph = (lt % p.dur) / p.dur;
+          const s = Math.sin(Math.PI * ph);
+          x = rect.left + p.x * rect.width;
+          y = rect.top + p.y * rect.height;
+          scale = s;
+          alpha = s;
+        }
+
+        const size = p.size * scale;
+        if (size < 1) continue;
+
+        const a = p.rot + p.spin * lt;
+        const cos = Math.cos(a) * dpr;
+        const sin = Math.sin(a) * dpr;
+
+        ctx.globalAlpha = alpha * endFade;
+        ctx.setTransform(cos, sin, -sin, cos, x * dpr, y * dpr);
+        ctx.drawImage(p.sprite, -size / 2, -size / 2, size, size);
+      }
+
+      rafRef.current = requestAnimationFrame(tick);
+    };
+
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(tick);
   };
 
   /* -----------------------------------------------------
@@ -323,9 +473,9 @@ export function InvitationCard({ onReveal }: { onReveal: () => void }) {
         window.clearTimeout(hideTimerRef.current);
         hideTimerRef.current = null;
       }
-      if (glitterTimerRef.current) {
-        window.clearTimeout(glitterTimerRef.current);
-        glitterTimerRef.current = null;
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
       }
     };
   }, []);
@@ -361,15 +511,8 @@ export function InvitationCard({ onReveal }: { onReveal: () => void }) {
       scratchingRef.current = false;
       setRevealed(true);
 
-      // Glitter falling from top to bottom
-      setGlitter(makeGlitter());
-      setBurst(makeBurst());
-      setTwinkles(makeTwinkles());
-      glitterTimerRef.current = window.setTimeout(() => {
-        setGlitter([]);
-        setBurst([]);
-        setTwinkles([]);
-      }, 12000);
+      // Start sparkles after React has painted the reveal state
+      requestAnimationFrame(() => startSparkles());
 
       canvas.style.transition = "opacity 1s ease";
       canvas.style.opacity = "0";
@@ -464,96 +607,13 @@ export function InvitationCard({ onReveal }: { onReveal: () => void }) {
       className="py-16 md:py-20 px-6 cream-bg text-center overflow-x-clip"
       ref={sectionRef}
     >
-      <style>{`
-        .glitter-piece {
-          position: absolute;
-          top: 0;
-          display: block;
-          opacity: 0;
-          animation-name: glitter-fall;
-          animation-timing-function: linear;
-          animation-fill-mode: forwards;
-          will-change: transform, opacity;
-        }
-        .glitter-piece > i {
-          display: block;
-          animation: glitter-twinkle 0.9s ease-in-out infinite alternate;
-        }
-        @keyframes glitter-fall {
-          0%   { transform: translate3d(0, -20px, 0) rotate(0deg); opacity: 0; }
-          10%  { opacity: 1; }
-          90%  { opacity: 1; }
-          100% { transform: translate3d(var(--drift), var(--fall), 0) rotate(360deg); opacity: 0; }
-        }
-        @keyframes glitter-twinkle {
-          from { transform: scale(0.4); opacity: 0.5; }
-          to   { transform: scale(1.1); opacity: 1; }
-        }
-        .sparkle {
-          position: absolute;
-          display: block;
-          pointer-events: none;
-        }
-        .sparkle-burst {
-          left: 50%;
-          top: 45%;
-          opacity: 0;
-          animation-name: sparkle-burst;
-          animation-timing-function: cubic-bezier(0.15, 0.7, 0.3, 1);
-          animation-fill-mode: forwards;
-        }
-        .sparkle-twinkle {
-          opacity: 0;
-          animation-name: sparkle-pop;
-          animation-timing-function: ease-in-out;
-          animation-iteration-count: infinite;
-        }
-        @keyframes sparkle-burst {
-          0%   { transform: translate(-50%, -50%) scale(0) rotate(0deg); opacity: 1; }
-          70%  { opacity: 1; }
-          100% { transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(1) rotate(180deg); opacity: 0; }
-        }
-        @keyframes sparkle-pop {
-          0%, 100% { transform: scale(0) rotate(0deg); opacity: 0; }
-          50%      { transform: scale(1) rotate(45deg); opacity: 1; }
-        }
-        @media (prefers-reduced-motion: reduce) {
-          .glitter-layer, .sparkle { display: none; }
-        }
-      `}</style>
-
-      {glitter.length > 0 && (
-        <div
-          aria-hidden="true"
-          className="glitter-layer fixed inset-0 z-50 pointer-events-none overflow-hidden"
-          style={{ ["--fall" as string]: `${window.innerHeight + 40}px` }}
-        >
-          {glitter.map((p) => (
-            <span
-              key={p.id}
-              className="glitter-piece"
-              style={{
-                left: `${p.left}%`,
-                animationDelay: `${p.delay}s`,
-                animationDuration: `${p.duration}s`,
-                filter: `drop-shadow(0 0 3px ${p.color})`,
-                ["--drift" as string]: `${p.drift}px`,
-              }}
-            >
-              <i
-                style={{
-                  width: p.size,
-                  height: p.size,
-                  background: p.color,
-                  borderRadius: p.star ? 0 : "50%",
-                  clipPath: p.star ? STAR_CLIP : undefined,
-                  animationDelay: `${p.delay}s`,
-                }}
-              />
-            </span>
-          ))}
-        </div>
-      )}
+      {/* Sparkle layer: one fixed canvas, hidden until reveal */}
+      <canvas
+        ref={fxCanvasRef}
+        aria-hidden="true"
+        className="fixed inset-0 w-full h-full z-50 pointer-events-none"
+        style={{ display: "none" }}
+      />
 
       <h2 className="font-calligraphy text-4xl md:text-8xl text-[var(--primary)] break-words">
         Our forever begins
@@ -692,45 +752,6 @@ export function InvitationCard({ onReveal }: { onReveal: () => void }) {
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
         />
-
-        {/* Sparkles over the heart after reveal */}
-        {burst.map((b) => (
-          <span
-            key={`b${b.id}`}
-            aria-hidden="true"
-            className="sparkle sparkle-burst z-30"
-            style={{
-              width: b.size,
-              height: b.size,
-              background: b.color,
-              clipPath: STAR_CLIP,
-              filter: `drop-shadow(0 0 4px ${b.color})`,
-              animationDelay: `${b.delay}s`,
-              animationDuration: `${b.duration}s`,
-              ["--dx" as string]: `${b.dx}px`,
-              ["--dy" as string]: `${b.dy}px`,
-            }}
-          />
-        ))}
-
-        {twinkles.map((t) => (
-          <span
-            key={`t${t.id}`}
-            aria-hidden="true"
-            className="sparkle sparkle-twinkle z-30"
-            style={{
-              left: `${t.left}%`,
-              top: `${t.top}%`,
-              width: t.size,
-              height: t.size,
-              background: t.color,
-              clipPath: STAR_CLIP,
-              filter: `drop-shadow(0 0 4px ${t.color})`,
-              animationDelay: `${t.delay}s`,
-              animationDuration: `${t.duration}s`,
-            }}
-          />
-        ))}
       </div>
 
       {/* Message after scratch */}

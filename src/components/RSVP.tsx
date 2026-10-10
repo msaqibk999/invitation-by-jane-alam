@@ -232,19 +232,27 @@ export function RSVP() {
           0%   { opacity: .55; transform: scale(0.6); }
           100% { opacity: 0; transform: scale(2.4); }
         }
-        @keyframes rs-shimmer {
-          0%   { transform: translate3d(-130%,0,0) skewX(-20deg); }
-          60%, 100% { transform: translate3d(330%,0,0) skewX(-20deg); }
+
+        /* Submit button: soft ripple halo behind the button.
+           Only transform + opacity are animated, so it runs on the GPU
+           compositor and never triggers layout or paint. */
+        @keyframes rs-halo {
+          0%   { opacity: 0.4; transform: scale3d(1, 1, 1); }
+          70%  { opacity: 0;   transform: scale3d(1.05, 1.22, 1); }
+          100% { opacity: 0;   transform: scale3d(1.05, 1.22, 1); }
         }
+
         @media (prefers-reduced-motion: reduce) {
           .rs-t, .rs-a { transition: none !important; animation: none !important; }
           .rs-a { opacity: 1 !important; }
+          .rs-halo { display: none !important; }
+          .rs-btn-heart { animation: none !important; }
         }
       `}</style>
 
       <section
         ref={ref}
-        className="overflow-hidden py-12 sm:py-16 md:py-24 px-4 sm:px-6"
+        className="overflow-x-clip py-12 sm:py-16 md:py-24 px-4 sm:px-6"
       >
         <div className="w-full max-w-3xl mx-auto">
           {/* Header */}
@@ -267,33 +275,35 @@ export function RSVP() {
               />
             </div>
 
-            {/* RSVP title: extra vertical room prevents calligraphy clipping on iOS */}
-            <h2 className="font-calligraphy text-6xl md:text-7xl text-[var(--primary)] leading-[1.5] py-2">
+            {/*
+              RSVP title.
+              Calligraphy glyphs (the "P" especially) overhang their advance
+              width. iOS Safari clips animated text to its layer box, so:
+                - the text lives in an inline-block with generous padding on
+                  every side, so the overhang sits INSIDE the box
+                - the reveal is opacity + a small lift only (no mask / overflow
+                  reveal that could crop the glyph)
+                - no overflow-hidden anywhere around it
+            */}
+            <h2 className="font-calligraphy text-6xl md:text-7xl text-[var(--primary)] leading-[1.4] whitespace-nowrap">
               <span
-                className="inline-block align-middle"
+                className="rs-t inline-block"
                 style={{
-                  padding: "0.25em 0.12em 0.35em",
-                  margin: "-0.1em 0",
+                  padding: "0.3em 0.6em 0.4em 0.4em",
+                  opacity: inView ? 1 : 0,
+                  transform: inView
+                    ? "translate3d(0,0,0)"
+                    : "translate3d(0,24px,0)",
+                  transition: `opacity 1100ms ${EASE} 200ms, transform 1100ms ${EASE} 200ms`,
                 }}
               >
-                <span
-                  className="rs-t inline-block"
-                  style={{
-                    opacity: inView ? 1 : 0,
-                    transform: inView
-                      ? "translate3d(0,0,0)"
-                      : "translate3d(0,115%,0)",
-                    transition: `opacity 1100ms ${EASE} 200ms, transform 1100ms ${EASE} 200ms`,
-                  }}
-                >
-                  RSVP
-                </span>
+                RSVP
               </span>
             </h2>
 
             {/* Gold line that draws outward */}
             <div
-              className="rs-t mx-auto mt-3 h-px bg-[var(--primary)]"
+              className="rs-t mx-auto mt-1 h-px bg-[var(--primary)]"
               style={{
                 width: inView ? "7rem" : "0rem",
                 opacity: 0.5,
@@ -427,50 +437,60 @@ export function RSVP() {
 
               {/* Submit */}
               <div style={fadeUp(inView, 1350)} className="rs-t">
-                <button
-                  type="submit"
-                  disabled={sending}
-                  className="
-                    relative
-                    overflow-hidden
-                    flex
-                    items-center
-                    justify-center
-                    gap-3
-                    w-full
-                    h-24
-                    rounded-lg
-                    bg-[var(--primary)]
-                    text-white
-                    text-4xl
-                    font-medium
-                    shadow-gold
-                    transition-all
-                    duration-300
-                    active:scale-[0.98]
-                    disabled:opacity-60
-                    disabled:cursor-not-allowed
-                    mt-4
-                  "
-                >
-                  {/* Shimmer sweep */}
-                  {!sending && (
+                <div className="relative mt-4">
+                  {/* Soft ripple halo (opacity + transform only) */}
+                  {!sending && inView && (
                     <span
                       aria-hidden="true"
-                      className="rs-a pointer-events-none absolute inset-y-0 left-0 w-1/4 bg-gradient-to-r from-transparent via-white/30 to-transparent"
+                      className="rs-halo pointer-events-none absolute inset-0 rounded-lg bg-[var(--primary)]"
                       style={{
-                        animation: inView
-                          ? "rs-shimmer 4s ease-in-out 2.5s infinite"
-                          : "none",
+                        animation: "rs-halo 2.6s ease-out 2s infinite",
+                        willChange: "transform, opacity",
                       }}
                     />
                   )}
 
-                  {sending && <Loader2 size={34} className="animate-spin" />}
-                  <span className="relative">
-                    {sending ? "Sending..." : "Send RSVP"}
-                  </span>
-                </button>
+                  <button
+                    type="submit"
+                    disabled={sending}
+                    className="
+                      relative
+                      z-10
+                      flex
+                      items-center
+                      justify-center
+                      gap-3
+                      w-full
+                      h-24
+                      rounded-lg
+                      bg-[var(--primary)]
+                      text-white
+                      text-4xl
+                      font-medium
+                      shadow-gold
+                      transition-transform
+                      duration-200
+                      active:scale-[0.98]
+                      disabled:opacity-60
+                      disabled:cursor-not-allowed
+                    "
+                  >
+                    {sending ? (
+                      <Loader2 size={34} className="animate-spin" />
+                    ) : (
+                      <Heart
+                        size={30}
+                        fill="currentColor"
+                        stroke="none"
+                        className="rs-btn-heart"
+                        style={{
+                          animation: "rs-beat 2.4s ease-in-out 2s infinite",
+                        }}
+                      />
+                    )}
+                    <span>{sending ? "Sending..." : "Send RSVP"}</span>
+                  </button>
+                </div>
               </div>
             </form>
           )}
