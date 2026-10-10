@@ -114,39 +114,38 @@ export default function App() {
 
   const autoScrollCancelled = useRef(false);
 
+  // -------------------------------------------------------
+  // LOCK SCROLL WHILE HERO IS ACTIVE
+  // -------------------------------------------------------
+
   useEffect(() => {
-    // No auto-scroll for the initial Hero stage
     if (pageStage === 0) return;
-
+  
     autoScrollCancelled.current = false;
-
+  
     let cancelAnimation: (() => void) | undefined;
-
-    // Cancel automatic scrolling when the user interacts
-    // with the page manually.
+  
     const cancelAutoScroll = () => {
       autoScrollCancelled.current = true;
-
+  
       if (cancelAnimation) {
         cancelAnimation();
+        cancelAnimation = undefined;
       }
     };
-
-    // Mouse wheel
+  
     window.addEventListener("wheel", cancelAutoScroll, {
       passive: true,
     });
-
-    // Touch scrolling
+  
     window.addEventListener("touchstart", cancelAutoScroll, {
       passive: true,
     });
-
+  
     window.addEventListener("touchmove", cancelAutoScroll, {
       passive: true,
     });
-
-    // Keyboard scrolling
+  
     const handleKeyDown = (event: KeyboardEvent) => {
       const scrollKeys = [
         "ArrowDown",
@@ -157,45 +156,33 @@ export default function App() {
         "End",
         " ",
       ];
-
+  
       if (scrollKeys.includes(event.key)) {
         cancelAutoScroll();
       }
     };
-
+  
     window.addEventListener("keydown", handleKeyDown);
-
-    // Wait 3 seconds before starting the automatic scroll
+  
     const timeout = window.setTimeout(() => {
       if (autoScrollCancelled.current) return;
-
-      // Stage 1:
-      // Scroll to Welcome
+  
+      // Only Stage 1 gets the 3-second auto-scroll
       if (pageStage === 1 && welcomeRef.current) {
         cancelAnimation = slowScrollTo(
           welcomeRef.current,
           2500
         );
       }
-
-      // Stage 2:
-      // Scroll to Countdown
-      if (pageStage === 2 && countdownRef.current) {
-        cancelAnimation = slowScrollTo(
-          countdownRef.current,
-          2500
-        );
-      }
-    }, 3000);
-
-    // Cleanup
+    }, 1500);
+  
     return () => {
       window.clearTimeout(timeout);
-
+  
       if (cancelAnimation) {
         cancelAnimation();
       }
-
+  
       window.removeEventListener("wheel", cancelAutoScroll);
       window.removeEventListener("touchstart", cancelAutoScroll);
       window.removeEventListener("touchmove", cancelAutoScroll);

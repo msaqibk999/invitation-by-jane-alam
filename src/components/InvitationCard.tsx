@@ -66,13 +66,31 @@ function drawScratchLayer(
     }
   }
 
-  // Instruction text
+  // Instruction text (scales with heart size, 3 lines, higher contrast)
+  const clamp = (v: number, min: number, max: number) =>
+    Math.min(max, Math.max(min, v));
+
+  const big = clamp(width * 0.15, 40, 72);
+  const small = clamp(width * 0.095, 26, 44);
+
   ctx.textAlign = "center";
-  ctx.fillStyle = "rgba(145,70,82,0.85)";
-  ctx.font = "italic 30px Georgia";
-  ctx.fillText("Scratch", width / 2, height * 0.45);
-  ctx.font = "italic 21px Georgia";
-  ctx.fillText("to reveal our date", width / 2, height * 0.51);
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "rgba(110,40,55,0.95)";
+  ctx.shadowColor = "rgba(255,255,255,0.7)";
+  ctx.shadowBlur = 4;
+
+  ctx.font = `italic 700 ${big}px Georgia, serif`;
+  ctx.fillText("Scratch", width / 2, height * 0.38);
+
+  ctx.font = `italic 600 ${small}px Georgia, serif`;
+  ctx.fillText("to reveal", width / 2, height * 0.38 + big * 0.85);
+  ctx.fillText(
+    "our date",
+    width / 2,
+    height * 0.38 + big * 0.85 + small * 1.25
+  );
+
+  ctx.shadowBlur = 0;
 
   ctx.restore();
 
@@ -85,8 +103,97 @@ function drawScratchLayer(
 }
 
 /* -------------------------------------------------------
+ * Glitter
+ * ----------------------------------------------------- */
+
+type Particle = {
+  id: number;
+  left: number;
+  size: number;
+  delay: number;
+  duration: number;
+  drift: number;
+  color: string;
+  star: boolean;
+};
+
+const GLITTER_COLORS = [
+  "#f6d98b",
+  "#e8b84a",
+  "#fff3c4",
+  "#f2c6c2",
+  "#ffffff",
+  "#d9a441",
+];
+const STAR_CLIP =
+  "polygon(50% 0%, 61% 39%, 100% 50%, 61% 61%, 50% 100%, 39% 61%, 0% 50%, 39% 39%)";
+
+function makeGlitter(count = 220): Particle[] {
+  return Array.from({ length: count }, (_, id) => ({
+    id,
+    left: Math.random() * 100,
+    size: 4 + Math.random() * 11,
+    delay: Math.random() * 4,
+    duration: 3 + Math.random() * 4,
+    drift: (Math.random() - 0.5) * 120,
+    color: GLITTER_COLORS[Math.floor(Math.random() * GLITTER_COLORS.length)],
+    star: Math.random() > 0.45,
+  }));
+}
+
+/* -------------------------------------------------------
  * Constants
  * ----------------------------------------------------- */
+
+/* Burst: sparkles shooting outward from the heart centre */
+type BurstPiece = {
+  id: number;
+  dx: number;
+  dy: number;
+  size: number;
+  delay: number;
+  duration: number;
+  color: string;
+};
+
+function makeBurst(count = 48): BurstPiece[] {
+  return Array.from({ length: count }, (_, id) => {
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 90 + Math.random() * 190;
+    return {
+      id,
+      dx: Math.cos(angle) * dist,
+      dy: Math.sin(angle) * dist,
+      size: 8 + Math.random() * 14,
+      delay: Math.random() * 0.5,
+      duration: 1.1 + Math.random() * 0.9,
+      color: GLITTER_COLORS[Math.floor(Math.random() * GLITTER_COLORS.length)],
+    };
+  });
+}
+
+/* Twinkles: stars that pop in and out on the heart */
+type Twinkle = {
+  id: number;
+  left: number;
+  top: number;
+  size: number;
+  delay: number;
+  duration: number;
+  color: string;
+};
+
+function makeTwinkles(count = 30): Twinkle[] {
+  return Array.from({ length: count }, (_, id) => ({
+    id,
+    left: 8 + Math.random() * 84,
+    top: 8 + Math.random() * 78,
+    size: 10 + Math.random() * 18,
+    delay: Math.random() * 3,
+    duration: 0.9 + Math.random() * 1.1,
+    color: GLITTER_COLORS[Math.floor(Math.random() * GLITTER_COLORS.length)],
+  }));
+}
 
 const SAMPLE = 60; // low-res grid used to measure how much is scratched
 const REVEAL_THRESHOLD = 0.6; // fraction of the heart that must be scratched
@@ -98,10 +205,14 @@ const CHECK_INTERVAL_MS = 120;
  * ----------------------------------------------------- */
 
 export function InvitationCard({ onReveal }: { onReveal: () => void }) {
+  const sectionRef = useRef<HTMLElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const [revealed, setRevealed] = useState(false);
+  const [glitter, setGlitter] = useState<Particle[]>([]);
+  const [burst, setBurst] = useState<BurstPiece[]>([]);
+  const [twinkles, setTwinkles] = useState<Twinkle[]>([]);
 
   // Refs instead of state: no re-render on every pointer move
   const scratchingRef = useRef(false);
@@ -112,6 +223,7 @@ export function InvitationCard({ onReveal }: { onReveal: () => void }) {
   const sizeRef = useRef({ w: 0, h: 0 });
   const lastCheckRef = useRef(0);
   const hideTimerRef = useRef<number | null>(null);
+  const glitterTimerRef = useRef<number | null>(null);
 
   /* -----------------------------------------------------
    * Google Calendar
@@ -211,6 +323,10 @@ export function InvitationCard({ onReveal }: { onReveal: () => void }) {
         window.clearTimeout(hideTimerRef.current);
         hideTimerRef.current = null;
       }
+      if (glitterTimerRef.current) {
+        window.clearTimeout(glitterTimerRef.current);
+        glitterTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -244,7 +360,16 @@ export function InvitationCard({ onReveal }: { onReveal: () => void }) {
       revealedRef.current = true;
       scratchingRef.current = false;
       setRevealed(true);
-      onReveal();
+
+      // Glitter falling from top to bottom
+      setGlitter(makeGlitter());
+      setBurst(makeBurst());
+      setTwinkles(makeTwinkles());
+      glitterTimerRef.current = window.setTimeout(() => {
+        setGlitter([]);
+        setBurst([]);
+        setTwinkles([]);
+      }, 12000);
 
       canvas.style.transition = "opacity 1s ease";
       canvas.style.opacity = "0";
@@ -252,6 +377,22 @@ export function InvitationCard({ onReveal }: { onReveal: () => void }) {
 
       hideTimerRef.current = window.setTimeout(() => {
         canvas.style.display = "none";
+      }, 1000);
+
+      // Unlock the next section immediately
+      onReveal();
+
+      // Wait 1 second, then smoothly scroll upward
+      window.setTimeout(() => {
+        if (!sectionRef.current) return;
+
+        const targetY =
+          sectionRef.current.getBoundingClientRect().top + window.scrollY;
+
+        window.scrollTo({
+          top: targetY,
+          behavior: "smooth",
+        });
       }, 1000);
     }
   };
@@ -319,7 +460,101 @@ export function InvitationCard({ onReveal }: { onReveal: () => void }) {
    * =================================================== */
 
   return (
-    <section className="py-16 md:py-20 px-6 cream-bg text-center overflow-x-clip">
+    <section
+      className="py-16 md:py-20 px-6 cream-bg text-center overflow-x-clip"
+      ref={sectionRef}
+    >
+      <style>{`
+        .glitter-piece {
+          position: absolute;
+          top: 0;
+          display: block;
+          opacity: 0;
+          animation-name: glitter-fall;
+          animation-timing-function: linear;
+          animation-fill-mode: forwards;
+          will-change: transform, opacity;
+        }
+        .glitter-piece > i {
+          display: block;
+          animation: glitter-twinkle 0.9s ease-in-out infinite alternate;
+        }
+        @keyframes glitter-fall {
+          0%   { transform: translate3d(0, -20px, 0) rotate(0deg); opacity: 0; }
+          10%  { opacity: 1; }
+          90%  { opacity: 1; }
+          100% { transform: translate3d(var(--drift), var(--fall), 0) rotate(360deg); opacity: 0; }
+        }
+        @keyframes glitter-twinkle {
+          from { transform: scale(0.4); opacity: 0.5; }
+          to   { transform: scale(1.1); opacity: 1; }
+        }
+        .sparkle {
+          position: absolute;
+          display: block;
+          pointer-events: none;
+        }
+        .sparkle-burst {
+          left: 50%;
+          top: 45%;
+          opacity: 0;
+          animation-name: sparkle-burst;
+          animation-timing-function: cubic-bezier(0.15, 0.7, 0.3, 1);
+          animation-fill-mode: forwards;
+        }
+        .sparkle-twinkle {
+          opacity: 0;
+          animation-name: sparkle-pop;
+          animation-timing-function: ease-in-out;
+          animation-iteration-count: infinite;
+        }
+        @keyframes sparkle-burst {
+          0%   { transform: translate(-50%, -50%) scale(0) rotate(0deg); opacity: 1; }
+          70%  { opacity: 1; }
+          100% { transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(1) rotate(180deg); opacity: 0; }
+        }
+        @keyframes sparkle-pop {
+          0%, 100% { transform: scale(0) rotate(0deg); opacity: 0; }
+          50%      { transform: scale(1) rotate(45deg); opacity: 1; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .glitter-layer, .sparkle { display: none; }
+        }
+      `}</style>
+
+      {glitter.length > 0 && (
+        <div
+          aria-hidden="true"
+          className="glitter-layer fixed inset-0 z-50 pointer-events-none overflow-hidden"
+          style={{ ["--fall" as string]: `${window.innerHeight + 40}px` }}
+        >
+          {glitter.map((p) => (
+            <span
+              key={p.id}
+              className="glitter-piece"
+              style={{
+                left: `${p.left}%`,
+                animationDelay: `${p.delay}s`,
+                animationDuration: `${p.duration}s`,
+                filter: `drop-shadow(0 0 3px ${p.color})`,
+                ["--drift" as string]: `${p.drift}px`,
+              }}
+            >
+              <i
+                style={{
+                  width: p.size,
+                  height: p.size,
+                  background: p.color,
+                  borderRadius: p.star ? 0 : "50%",
+                  clipPath: p.star ? STAR_CLIP : undefined,
+                  animationDelay: `${p.delay}s`,
+                }}
+              />
+            </span>
+          ))}
+        </div>
+      )}
+
       <h2 className="font-calligraphy text-4xl md:text-8xl text-[var(--primary)] break-words">
         Our forever begins
       </h2>
@@ -457,6 +692,45 @@ export function InvitationCard({ onReveal }: { onReveal: () => void }) {
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
         />
+
+        {/* Sparkles over the heart after reveal */}
+        {burst.map((b) => (
+          <span
+            key={`b${b.id}`}
+            aria-hidden="true"
+            className="sparkle sparkle-burst z-30"
+            style={{
+              width: b.size,
+              height: b.size,
+              background: b.color,
+              clipPath: STAR_CLIP,
+              filter: `drop-shadow(0 0 4px ${b.color})`,
+              animationDelay: `${b.delay}s`,
+              animationDuration: `${b.duration}s`,
+              ["--dx" as string]: `${b.dx}px`,
+              ["--dy" as string]: `${b.dy}px`,
+            }}
+          />
+        ))}
+
+        {twinkles.map((t) => (
+          <span
+            key={`t${t.id}`}
+            aria-hidden="true"
+            className="sparkle sparkle-twinkle z-30"
+            style={{
+              left: `${t.left}%`,
+              top: `${t.top}%`,
+              width: t.size,
+              height: t.size,
+              background: t.color,
+              clipPath: STAR_CLIP,
+              filter: `drop-shadow(0 0 4px ${t.color})`,
+              animationDelay: `${t.delay}s`,
+              animationDuration: `${t.duration}s`,
+            }}
+          />
+        ))}
       </div>
 
       {/* Message after scratch */}

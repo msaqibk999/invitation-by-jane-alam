@@ -57,7 +57,7 @@ export function Hero({ onUnlock, onTap }: HeroProps) {
 
   return (
     <section
-      className="relative h-[100dvh] min-h-[100dvh] w-full overflow-hidden flex items-center justify-center bg-black"
+      className="relative flex h-[100svh] min-h-[100svh] w-full items-center justify-center overflow-hidden bg-black"
       onClick={() => {
         startVideo();
         onTap();
@@ -68,7 +68,7 @@ export function Hero({ onUnlock, onTap }: HeroProps) {
         ref={videoRef}
         src="https://res.cloudinary.com/ulfi8xon/video/upload/f_auto,q_auto/v1791022693/rose-gold-blush.mp4"
         poster="https://res.cloudinary.com/ulfi8xon/video/upload/so_0,f_auto,q_auto/v1791022693/rose-gold-blush.jpg"
-        className={`absolute inset-0 h-full w-full object-cover scale-[1.04] ${
+        className={`absolute inset-0 h-full w-full scale-[1.04] object-cover ${
           blurBackground ? "blur-[8px]" : "blur-0"
         } transition-[filter] duration-[1500ms] ease-in-out`}
         playsInline
@@ -88,32 +88,32 @@ export function Hero({ onUnlock, onTap }: HeroProps) {
       >
         <Heart size={30} fill="currentColor" className="mb-3" />
 
-        <p className="font-dancing text-2xl md:text-6xl mb-3">
+        <p className="font-dancing mb-3 text-2xl md:text-6xl">
           We're getting married
         </p>
 
-        <div className="flex items-center gap-3 my-3">
-          <div className="w-16 h-px bg-white/45" />
+        <div className="my-3 flex items-center gap-3">
+          <div className="h-px w-16 bg-white/45" />
           <Heart size={15} fill="currentColor" />
-          <div className="w-16 h-px bg-white/45" />
+          <div className="h-px w-16 bg-white/45" />
         </div>
 
-        <h1 className="font-dancing text-6xl md:text-9xl leading-none drop-shadow-lg">
+        <h1 className="font-dancing text-6xl leading-none drop-shadow-lg md:text-9xl">
           {wedding.groom.name}
 
-          <p className="font-display text-sm md:text-2xl italic whitespace-pre-line mt-3 mb-3">
+          <p className="font-display mt-3 mb-0 whitespace-pre-line text-sm italic md:text-3xl">
             {wedding.groom.subtext}
           </p>
         </h1>
 
-        <p className="font-dancing text-3xl md:text-5xl my-2">
+        <p className="font-dancing my-6 text-3xl md:text-5xl">
           &amp;
         </p>
 
-        <h1 className="font-dancing text-6xl md:text-9xl leading-none drop-shadow-lg">
+        <h1 className="font-dancing text-6xl leading-none drop-shadow-lg md:text-9xl">
           {wedding.bride.name}
 
-          <p className="font-display text-sm md:text-2xl italic whitespace-pre-line mt-6">
+          <p className="font-display mt-6 whitespace-pre-line text-sm italic md:text-3xl">
             {wedding.bride.subtext}
           </p>
         </h1>
@@ -124,14 +124,16 @@ export function Hero({ onUnlock, onTap }: HeroProps) {
         className={`absolute bottom-[max(3rem,env(safe-area-inset-bottom))] z-10 flex flex-col items-center gap-2 text-white/70 transition-opacity duration-[1200ms] ease-in-out ${
           showScroll
             ? "opacity-100"
-            : "opacity-0 pointer-events-none"
+            : "pointer-events-none opacity-0"
         }`}
       >
-        <span className="text-3xl uppercase tracking-widest">
-          Scroll
-        </span>
+        <div className="flex flex-col items-center gap-2 animate-bounce-slow">
+          <span className="text-4xl uppercase tracking-widest">
+            Scroll
+          </span>
 
-        <ChevronDown size={40} />
+          <ChevronDown size={60} />
+        </div>
       </div>
     </section>
   );
